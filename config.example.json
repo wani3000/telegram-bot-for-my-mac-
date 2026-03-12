@@ -1,0 +1,10 @@
+{
+  "BOT_TOKEN": "replace-with-your-telegram-token",
+  "ALLOWED_CHAT_IDS": [123456789],
+  "WORK_DIR": "/Users/chulwan/github/claude-telegram-bot",
+  "CLAUDE_BIN": "claude",
+  "CLAUDE_ARGS": ["-p"],
+  "MAX_HISTORY_TURNS": 12,
+  "MAX_MESSAGE_CHARS": 3500
+}
+
