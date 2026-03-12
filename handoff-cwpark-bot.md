@@ -20,6 +20,7 @@ Control Claude Code running on MacBook 2 from Telegram on MacBook 1.
 - Runs `claude -p "<prompt>"` in a chosen working directory
 - Returns the CLI output to Telegram
 - Keeps short in-memory history for normal messages
+- Applies timeout and prompt-budget limits to avoid stuck sessions
 
 ## Key Files
 
@@ -49,7 +50,7 @@ Control Claude Code running on MacBook 2 from Telegram on MacBook 1.
 - `/pwd`
   - Show working directory
 - `/cd /path`
-  - Change working directory for the current chat
+  - Change working directory for the current chat if the path already exists
 - `/new`
   - Clear session history
 - `/p prompt`
@@ -100,6 +101,7 @@ tail -f ~/github/claude-telegram-bot/stdout.log
 - Session history is in memory only and resets on restart.
 - This implementation assumes the Claude CLI supports `claude -p "<prompt>"`.
 - Long-running jobs are serialized per chat to avoid overlapping replies.
+- Claude commands now fail fast on timeout, but very long interactive workflows are still not ideal over Telegram.
 
 ## Suggested Next Task For Claude Code
 

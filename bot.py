@@ -5,6 +5,7 @@ import logging
 import os
 import shlex
 import shutil
+import textwrap
 from collections import defaultdict
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -64,6 +65,8 @@ CLAUDE_BIN = CONFIG.get("CLAUDE_BIN", "claude")
 CLAUDE_ARGS = CONFIG.get("CLAUDE_ARGS", ["-p"])
 MAX_HISTORY_TURNS = int(CONFIG.get("MAX_HISTORY_TURNS", 12))
 MAX_MESSAGE_CHARS = int(CONFIG.get("MAX_MESSAGE_CHARS", 3500))
+CLAUDE_TIMEOUT_SECONDS = int(CONFIG.get("CLAUDE_TIMEOUT_SECONDS", 600))
+MAX_PROMPT_CHARS = int(CONFIG.get("MAX_PROMPT_CHARS", 20000))
 
 
 @dataclass
@@ -100,6 +103,19 @@ def ensure_work_dir(path: Path) -> Path:
     return resolved
 
 
+def validate_startup_config() -> None:
+    if not BOT_TOKEN or "replace-with-your-telegram-token" in BOT_TOKEN:
+        raise ValueError("BOT_TOKEN is not configured in config.json.")
+    if not ALLOWED_CHAT_IDS:
+        raise ValueError("ALLOWED_CHAT_IDS must contain at least one chat id.")
+    if MAX_HISTORY_TURNS < 0:
+        raise ValueError("MAX_HISTORY_TURNS must be zero or greater.")
+    if MAX_MESSAGE_CHARS < 200:
+        raise ValueError("MAX_MESSAGE_CHARS is too small.")
+    if CLAUDE_TIMEOUT_SECONDS < 10:
+        raise ValueError("CLAUDE_TIMEOUT_SECONDS must be at least 10 seconds.")
+
+
 def get_chat_state(chat_id: int) -> ChatState:
     state = CHAT_STATES[chat_id]
     state.work_dir = ensure_work_dir(state.work_dir)
@@ -125,7 +141,45 @@ def build_session_prompt(history: List[dict], user_message: str) -> str:
     lines.append(user_message)
     lines.append("")
     lines.append("ASSISTANT:")
-    return "\n".join(lines)
+    prompt = "\n".join(lines)
+    if len(prompt) <= MAX_PROMPT_CHARS:
+        return prompt
+
+    # Trim oldest items until the prompt fits within the configured budget.
+    while trimmed and len(prompt) > MAX_PROMPT_CHARS:
+        trimmed = trimmed[2:]
+        lines = [
+            "You are Claude Code running in a Telegram bridge.",
+            "Continue the conversation using the history below.",
+            "Be concise but complete, and include actionable terminal-oriented help when relevant.",
+            "",
+        ]
+        for item in trimmed:
+            role = item["role"].upper()
+            lines.append(f"{role}:")
+            lines.append(item["content"])
+            lines.append("")
+        lines.append("USER:")
+        lines.append(user_message)
+        lines.append("")
+        lines.append("ASSISTANT:")
+        prompt = "\n".join(lines)
+
+    if len(prompt) <= MAX_PROMPT_CHARS:
+        return prompt
+
+    clipped_user_message = user_message[-max(1000, MAX_PROMPT_CHARS // 2) :]
+    return textwrap.dedent(
+        f"""\
+        You are Claude Code running in a Telegram bridge.
+        Earlier conversation was truncated because it exceeded the prompt size budget.
+
+        USER:
+        {clipped_user_message}
+
+        ASSISTANT:
+        """
+    )
 
 
 def find_claude_binary() -> str:
@@ -152,7 +206,19 @@ async def run_claude(prompt: str, work_dir: Path) -> str:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
-    stdout, stderr = await process.communicate()
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            process.communicate(),
+            timeout=CLAUDE_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        process.kill()
+        await process.communicate()
+        logger.error("Claude command timed out after %s seconds", CLAUDE_TIMEOUT_SECONDS)
+        raise RuntimeError(
+            f"Claude timed out after {CLAUDE_TIMEOUT_SECONDS} seconds. "
+            "Try a shorter prompt or check whether the CLI is waiting for input."
+        )
     output = stdout.decode("utf-8", errors="replace").strip()
     error = stderr.decode("utf-8", errors="replace").strip()
 
@@ -253,7 +319,14 @@ async def cmd_cd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not candidate.is_absolute():
         candidate = (state.work_dir / candidate).resolve()
 
-    state.work_dir = ensure_work_dir(candidate)
+    if not candidate.exists():
+        await update.message.reply_text(f"Path does not exist:\n{candidate}")
+        return
+    if not candidate.is_dir():
+        await update.message.reply_text(f"Path is not a directory:\n{candidate}")
+        return
+
+    state.work_dir = candidate.resolve()
     await update.message.reply_text(f"Changed directory to:\n{state.work_dir}")
 
 
@@ -317,6 +390,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 def main() -> None:
+    validate_startup_config()
     DEFAULT_WORK_DIR.mkdir(parents=True, exist_ok=True)
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
@@ -333,4 +407,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

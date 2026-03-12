@@ -29,6 +29,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 
 echo "[5/7] Preparing config"
+CONFIG_READY="yes"
 if [ ! -f config.json ]; then
   cp config.example.json config.json
   CLAUDE_PATH="$(command -v claude || true)"
@@ -36,6 +37,11 @@ if [ ! -f config.json ]; then
     perl -0pi -e "s|\"CLAUDE_BIN\": \"claude\"|\"CLAUDE_BIN\": \"$CLAUDE_PATH\"|g" config.json
   fi
   echo "config.json created from template. Fill in BOT_TOKEN and ALLOWED_CHAT_IDS before starting."
+  CONFIG_READY="no"
+fi
+
+if grep -q 'replace-with-your-telegram-token' config.json; then
+  CONFIG_READY="no"
 fi
 
 mkdir -p "$HOME/Library/LaunchAgents"
@@ -68,10 +74,14 @@ cat > "$PLIST_PATH" <<PLIST
 PLIST
 
 echo "[7/7] Loading service"
-launchctl bootout "gui/$(id -u)/com.cwpark.claudebot" >/dev/null 2>&1 || true
-launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
-launchctl enable "gui/$(id -u)/com.cwpark.claudebot"
-launchctl kickstart -k "gui/$(id -u)/com.cwpark.claudebot" || true
+if [ "$CONFIG_READY" = "yes" ]; then
+  launchctl bootout "gui/$(id -u)/com.cwpark.claudebot" >/dev/null 2>&1 || true
+  launchctl bootstrap "gui/$(id -u)" "$PLIST_PATH"
+  launchctl enable "gui/$(id -u)/com.cwpark.claudebot"
+  launchctl kickstart -k "gui/$(id -u)/com.cwpark.claudebot" || true
+else
+  echo "Skipping launchd start because config.json still has placeholder values."
+fi
 
 echo
 echo "Install complete."
@@ -81,6 +91,14 @@ echo "Logs:"
 echo "  tail -f $INSTALL_DIR/bot.log"
 echo "  tail -f $INSTALL_DIR/stderr.log"
 echo
-echo "If config.json still has placeholder values, edit it and then restart:"
-echo "  launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot"
-
+if [ "$CONFIG_READY" = "yes" ]; then
+  echo "Service loaded. Restart manually any time with:"
+  echo "  launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot"
+else
+  echo "Next step:"
+  echo "  1. Edit $INSTALL_DIR/config.json"
+  echo "  2. Start the service with:"
+  echo "     launchctl bootstrap gui/$(id -u) $PLIST_PATH"
+  echo "     launchctl enable gui/$(id -u)/com.cwpark.claudebot"
+  echo "     launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot"
+fi

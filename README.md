@@ -13,6 +13,7 @@ Flow:
 - One-shot mode with `/p`
 - `/cd`, `/pwd`, `/new`, `/status`, `/start`
 - `launchd` auto-start support for macOS
+- Claude timeout protection and prompt-size trimming
 
 ## Files
 
@@ -50,7 +51,9 @@ launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot
   "WORK_DIR": "/Users/yourname/github/claude-telegram-bot",
   "CLAUDE_BIN": "claude",
   "CLAUDE_ARGS": ["-p"],
+  "CLAUDE_TIMEOUT_SECONDS": 600,
   "MAX_HISTORY_TURNS": 12,
+  "MAX_PROMPT_CHARS": 20000,
   "MAX_MESSAGE_CHARS": 3500
 }
 ```
@@ -60,7 +63,7 @@ launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot
 - Normal message: session conversation with remembered context
 - `/p <prompt>`: one-shot prompt without session history
 - `/new`: clear session history
-- `/cd <path>`: change working directory for this chat
+- `/cd <path>`: change working directory for this chat, only if the directory already exists
 - `/pwd`: show current working directory
 - `/status`: inspect bot state
 - `/start`: help and current `chat_id`
@@ -70,4 +73,4 @@ launchctl kickstart -k gui/$(id -u)/com.cwpark.claudebot
 - `config.json` is ignored by Git so secrets stay local.
 - If your Telegram token was ever exposed, rotate it in `@BotFather`.
 - This bot uses polling, so no webhook or public server is required.
-
+- `install.sh` does not auto-start the service until `config.json` has a real token.
